@@ -6,6 +6,7 @@
 
 #include <stdlib.h>
 #include <unistd.h>
+
 #include "leveldb/cache.h"
 #include "leveldb/comparator.h"
 #include "leveldb/db.h"
@@ -15,6 +16,10 @@
 #include "leveldb/options.h"
 #include "leveldb/status.h"
 #include "leveldb/write_batch.h"
+#include "db/dbformat.h"
+#include "db/write_batch_internal.h"
+#include "db/filename.h"
+#include "db/log_reader.h"
 
 using leveldb::Cache;
 using leveldb::Comparator;
@@ -40,7 +45,8 @@ using leveldb::Status;
 using leveldb::WritableFile;
 using leveldb::WriteBatch;
 using leveldb::WriteOptions;
-
+using leveldb::WriteBatchInternal;
+using leveldb::log::Reader;
 extern "C" {
 
 struct leveldb_t              { DB*               rep; };
@@ -56,6 +62,7 @@ struct leveldb_randomfile_t   { RandomAccessFile* rep; };
 struct leveldb_writablefile_t { WritableFile*     rep; };
 struct leveldb_logger_t       { Logger*           rep; };
 struct leveldb_filelock_t     { FileLock*         rep; };
+struct leveldb_binlog_reader_t { Reader *         rep; SequentialFile *file; };
 
 struct leveldb_comparator_t : public Comparator {
   void* state_;
@@ -192,6 +199,10 @@ void leveldb_write(
     leveldb_writebatch_t* batch,
     char** errptr) {
   SaveError(errptr, db->rep->Write(options->rep, &batch->rep));
+}
+
+uint64_t leveldb_last_sequence(leveldb_t* db) {
+  return db->rep->LastSequenceNumber();
 }
 
 char* leveldb_get(
@@ -332,6 +343,16 @@ const char* leveldb_iter_value(const leveldb_iterator_t* iter, size_t* vlen) {
 
 void leveldb_iter_get_error(const leveldb_iterator_t* iter, char** errptr) {
   SaveError(errptr, iter->rep->status());
+}
+
+void leveldb_writebatch_init(leveldb_writebatch_t* b, 
+			     const char* record, size_t len) {
+  Slice s(record, len);
+  WriteBatchInternal::SetContents(&b->rep, s);
+}
+
+uint64_t leveldb_writebatch_sequence(leveldb_writebatch_t* b) {
+  return WriteBatchInternal::Sequence(&b->rep);
 }
 
 leveldb_writebatch_t* leveldb_writebatch_create() {
@@ -590,6 +611,42 @@ int leveldb_major_version() {
 
 int leveldb_minor_version() {
   return kMinorVersion;
+}
+
+
+leveldb_binlog_reader_t* leveldb_binlog_open(const char *name) {
+  leveldb_binlog_reader_t *r = new leveldb_binlog_reader_t;
+  Env *env = Env::Default();
+  std::string fname = name;
+  SequentialFile* file;
+  Status status = env->NewSequentialFile(fname, &file);
+  if (!status.ok()) {
+    delete r;
+    return NULL;
+  }
+  r->rep = new Reader(file, NULL, true/*checksum*/,
+		      0/*initial_offset*/);
+  r->file = file;
+  return r;
+}
+
+const char* leveldb_binlog_read(leveldb_binlog_reader_t *reader,
+				size_t *len) {
+  std::string scratch;
+  Slice record;
+  if (!reader->rep->ReadRecord(&record, &scratch)) {
+    return NULL;
+  }
+  char *r = (char*)malloc(record.size());
+  memcpy(r, record.data(), record.size());
+  *len = record.size();
+  return r;
+}
+
+void leveldb_binlog_close(leveldb_binlog_reader_t* reader) {
+  delete reader->rep;
+  delete reader->file;
+  delete reader;
 }
 
 }  // end extern "C"

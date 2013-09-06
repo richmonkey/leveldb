@@ -67,6 +67,7 @@ typedef struct leveldb_snapshot_t      leveldb_snapshot_t;
 typedef struct leveldb_writablefile_t  leveldb_writablefile_t;
 typedef struct leveldb_writebatch_t    leveldb_writebatch_t;
 typedef struct leveldb_writeoptions_t  leveldb_writeoptions_t;
+typedef struct leveldb_binlog_reader_t leveldb_binlog_reader_t;
 
 /* DB operations */
 
@@ -95,6 +96,8 @@ extern void leveldb_write(
     const leveldb_writeoptions_t* options,
     leveldb_writebatch_t* batch,
     char** errptr);
+
+extern uint64_t leveldb_last_sequence(leveldb_t* db);
 
 /* Returns NULL if not found.  A malloc()ed array otherwise.
    Stores the length of the array in *vallen. */
@@ -160,6 +163,10 @@ extern const char* leveldb_iter_value(const leveldb_iterator_t*, size_t* vlen);
 extern void leveldb_iter_get_error(const leveldb_iterator_t*, char** errptr);
 
 /* Write batch */
+
+extern void leveldb_writebatch_init(leveldb_writebatch_t *, 
+				    const char *record, size_t len);
+extern uint64_t leveldb_writebatch_sequence(leveldb_writebatch_t*);
 
 extern leveldb_writebatch_t* leveldb_writebatch_create();
 extern void leveldb_writebatch_destroy(leveldb_writebatch_t*);
@@ -283,6 +290,12 @@ extern int leveldb_major_version();
 
 /* Return the minor version number for this release. */
 extern int leveldb_minor_version();
+
+
+extern leveldb_binlog_reader_t* leveldb_binlog_open(const char *name);
+extern const char* leveldb_binlog_read(leveldb_binlog_reader_t *reader, 
+				       size_t *len);
+extern void leveldb_binlog_close(leveldb_binlog_reader_t* reader);
 
 #ifdef __cplusplus
 }  /* end extern "C" */

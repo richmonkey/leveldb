@@ -33,6 +33,57 @@
 #include "util/logging.h"
 #include "util/mutexlock.h"
 
+//todo mv to env
+#include <unistd.h>
+#include <limits.h>
+
+static uint64_t FileNO(const char *path) {
+  int i;
+  int r;
+  uint64_t NO;
+  int len = strlen(path);
+  const char *p = path;
+
+  for (i = len-1; i >= 0; i--) {
+    if (path[i] == '/') {
+      p = path+i+1;
+      break;
+    }
+  }
+  r = sscanf(p, "%llu", &NO);
+  if (r != 1) {
+    return -1;
+  }
+  return NO;
+}
+
+static void LinkBinlog(const std::string& name, const std::string& dbname) {
+  int r;
+  char path[PATH_MAX] = {0};
+  std::string current = leveldb::LogFileName(dbname+"/binlog", 0);
+  uint64_t currentno = -1;
+
+  r = readlink(current.c_str(), path, PATH_MAX);
+  if (r > 0) {
+    currentno = FileNO(path);
+  }
+  if (currentno == -1) {
+    currentno = 2;
+  } else {
+    currentno++;
+  }
+
+  std::string lname = leveldb::LogFileName(dbname+"/binlog", currentno);
+
+  r = link(name.c_str(), lname.c_str());
+  r = unlink(current.c_str());
+  r = symlink(lname.c_str(), current.c_str());
+
+  printf("link %s->%s\n", name.c_str(), lname.c_str());
+  printf("symlink %s->%s\n", lname.c_str(), current.c_str());
+}
+
+
 namespace leveldb {
 
 const int kNumNonTableCacheFiles = 10;
@@ -594,6 +645,10 @@ Status DBImpl::TEST_CompactMemTable() {
     }
   }
   return s;
+}
+
+uint64_t DBImpl::LastSequenceNumber() {
+  return versions_->LastSequence();
 }
 
 void DBImpl::MaybeScheduleCompaction() {
@@ -1315,6 +1370,7 @@ Status DBImpl::MakeRoomForWrite(bool force) {
         versions_->ReuseFileNumber(new_log_number);
         break;
       }
+      LinkBinlog(LogFileName(dbname_, new_log_number), dbname_);
       delete log_;
       delete logfile_;
       logfile_ = lfile;
@@ -1427,6 +1483,8 @@ Status DB::Delete(const WriteOptions& opt, const Slice& key) {
 
 DB::~DB() { }
 
+
+
 Status DB::Open(const Options& options, const std::string& dbname,
                 DB** dbptr) {
   *dbptr = NULL;
@@ -1440,6 +1498,7 @@ Status DB::Open(const Options& options, const std::string& dbname,
     WritableFile* lfile;
     s = options.env->NewWritableFile(LogFileName(dbname, new_log_number),
                                      &lfile);
+    LinkBinlog(LogFileName(dbname, new_log_number), dbname);
     if (s.ok()) {
       edit.SetLogNumber(new_log_number);
       impl->logfile_ = lfile;

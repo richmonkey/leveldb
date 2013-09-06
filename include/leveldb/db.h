@@ -140,6 +140,8 @@ class DB {
   //    db->CompactRange(NULL, NULL);
   virtual void CompactRange(const Slice* begin, const Slice* end) = 0;
 
+  virtual uint64_t LastSequenceNumber() = 0;
+
  private:
   // No copying allowed
   DB(const DB&);
