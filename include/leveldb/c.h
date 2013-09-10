@@ -291,8 +291,11 @@ extern int leveldb_major_version();
 /* Return the minor version number for this release. */
 extern int leveldb_minor_version();
 
+extern leveldb_binlog_reader_t* leveldb_binlog_search(const char *name, 
+						      uint64_t sequence);
 
 extern leveldb_binlog_reader_t* leveldb_binlog_open(const char *name);
+
 extern const char* leveldb_binlog_read(leveldb_binlog_reader_t *reader, 
 				       size_t *len);
 extern void leveldb_binlog_close(leveldb_binlog_reader_t* reader);

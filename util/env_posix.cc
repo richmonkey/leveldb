@@ -39,11 +39,12 @@ class PosixSequentialFile: public SequentialFile {
  private:
   std::string filename_;
   FILE* file_;
+  bool close_;
 
  public:
-  PosixSequentialFile(const std::string& fname, FILE* f)
-      : filename_(fname), file_(f) { }
-  virtual ~PosixSequentialFile() { fclose(file_); }
+  PosixSequentialFile(const std::string& fname, FILE* f, bool close)
+      : filename_(fname), file_(f), close_(close) { }
+  virtual ~PosixSequentialFile() { if (close_) fclose(file_); }
 
   virtual Status Read(size_t n, Slice* result, char* scratch) {
     Status s;
@@ -426,11 +427,17 @@ class PosixEnv : public Env {
       *result = NULL;
       return IOError(fname, errno);
     } else {
-      *result = new PosixSequentialFile(fname, f);
+      *result = new PosixSequentialFile(fname, f, true);
       return Status::OK();
     }
   }
 
+  virtual Status NewSequentialFile(const std::string& fname,
+				   FILE *f,
+                                   SequentialFile** result) {
+      *result = new PosixSequentialFile(fname, f, false);
+      return Status::OK();
+  }
   virtual Status NewRandomAccessFile(const std::string& fname,
                                      RandomAccessFile** result) {
     *result = NULL;

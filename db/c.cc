@@ -6,7 +6,7 @@
 
 #include <stdlib.h>
 #include <unistd.h>
-
+#include <memory>
 #include "leveldb/cache.h"
 #include "leveldb/comparator.h"
 #include "leveldb/db.h"
@@ -62,7 +62,12 @@ struct leveldb_randomfile_t   { RandomAccessFile* rep; };
 struct leveldb_writablefile_t { WritableFile*     rep; };
 struct leveldb_logger_t       { Logger*           rep; };
 struct leveldb_filelock_t     { FileLock*         rep; };
-struct leveldb_binlog_reader_t { Reader *         rep; SequentialFile *file; };
+
+struct leveldb_binlog_reader_t { 
+    Reader *         rep; 
+    SequentialFile *file; 
+    FILE *f; 
+};
 
 struct leveldb_comparator_t : public Comparator {
   void* state_;
@@ -613,20 +618,122 @@ int leveldb_minor_version() {
   return kMinorVersion;
 }
 
+static uint64_t binlog_sequence(Slice record) {
+    return leveldb::DecodeFixed64(record.data());
+}
+
+//binary search 
+leveldb_binlog_reader_t* leveldb_binlog_search(const char *name, 
+					       uint64_t sequence) {
+    leveldb_binlog_reader_t *br;
+    std::string scratch;
+    Slice record;
+    std::string fname(name);
+    long fsize;
+    Env *env = Env::Default();
+    int l, r, m;
+    uint64_t s;
+    FILE *f;
+    SequentialFile* file;
+    std::auto_ptr<Reader> reader;
+
+    f = fopen(name, "rb");
+    if (NULL == f) {
+	return NULL;
+    }
+
+    fseek(f, 0, SEEK_END);
+    fsize = ftell(f);
+
+    env->NewSequentialFile(fname, f, &file);
+
+    //read first block
+    fseek(f, 0, SEEK_SET);
+    reader.reset(new Reader(file, NULL, true/*checksum*/,
+			    0/*initial_offset*/));
+    
+    if (!reader->ReadRecord(&record, &scratch)) {
+	goto FAIL;
+    }
+    s = binlog_sequence(record);
+    if (s > sequence) {
+	goto FAIL;
+    }
+    if (s == sequence) {
+	goto FOUND;
+    }
+
+    //[l, r)
+    l = 0;
+    r = fsize/leveldb::log::kBlockSize;
+    if (fsize%leveldb::log::kBlockSize) r++;
+
+    while (l < r) {
+	m = (r+l)/2;
+	fseek(f, m*leveldb::log::kBlockSize, SEEK_SET);
+	reader.reset(new Reader(file, NULL, true/*checksum*/,
+				0/*initial_offset*/));
+
+	//hit zerotype
+	if (!reader->ReadRecord(&record, &scratch)) {
+	    r = m;
+	    continue;
+	}
+
+	s = binlog_sequence(record);
+	if (s == sequence) {
+	    goto FOUND;
+	} else if (s > sequence) {
+	    r = m;
+	} else if (r - l > 1) {
+	    l = m;
+	} else {
+	    //iterator the whole block
+	    //either noexists or last block
+	    while (1) {
+		if (!reader->ReadRecord(&record, &scratch)) {
+		    goto FAIL;
+		}
+		s = binlog_sequence(record);
+		if (s == sequence) {
+		    goto FOUND;
+		}
+	    }
+	}
+    }
+
+FOUND:
+    br = new leveldb_binlog_reader_t;
+    br->rep = reader.release();
+    br->f = f;
+    br->file = file;
+    return br;
+
+FAIL:
+    fclose(f);
+    delete file;
+    return NULL;
+}
+
 
 leveldb_binlog_reader_t* leveldb_binlog_open(const char *name) {
   leveldb_binlog_reader_t *r = new leveldb_binlog_reader_t;
   Env *env = Env::Default();
   std::string fname = name;
+  FILE* f;
   SequentialFile* file;
-  Status status = env->NewSequentialFile(fname, &file);
-  if (!status.ok()) {
-    delete r;
-    return NULL;
+
+  f = fopen(name, "r");
+  if (NULL == f) {
+      return NULL;
   }
+
+  env->NewSequentialFile(fname, f, &file);
+
   r->rep = new Reader(file, NULL, true/*checksum*/,
 		      0/*initial_offset*/);
   r->file = file;
+  r->f = f;
   return r;
 }
 
@@ -646,6 +753,7 @@ const char* leveldb_binlog_read(leveldb_binlog_reader_t *reader,
 void leveldb_binlog_close(leveldb_binlog_reader_t* reader) {
   delete reader->rep;
   delete reader->file;
+  fclose(reader->f);
   delete reader;
 }
 

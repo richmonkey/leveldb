@@ -146,6 +146,14 @@ bool Reader::ReadRecord(Slice* record, std::string* scratch) {
         }
         break;
 
+      case kZeroType:
+	if (in_fragmented_record) {
+          ReportCorruption(scratch->size(), "error in middle of record");
+          in_fragmented_record = false;
+          scratch->clear();
+        }
+	return false;
+
       default: {
         char buf[40];
         snprintf(buf, sizeof(buf), "unknown record type %u", record_type);
@@ -222,7 +230,7 @@ unsigned int Reader::ReadPhysicalRecord(Slice* result) {
       // such records are produced by the mmap based writing code in
       // env_posix.cc that preallocates file regions.
       buffer_.clear();
-      return kBadRecord;
+      return kZeroType;
     }
 
     // Check crc

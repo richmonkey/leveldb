@@ -57,10 +57,16 @@ static uint64_t FileNO(const char *path) {
   return NO;
 }
 
+static std::string binlogFileName(const std::string& dbname, uint64_t number) {
+  char buf[100];
+  snprintf(buf, sizeof(buf), "/binlog/%06llu.log", number);
+  return dbname + buf;
+}
+
 static void LinkBinlog(const std::string& name, const std::string& dbname) {
   int r;
   char path[PATH_MAX] = {0};
-  std::string current = leveldb::LogFileName(dbname+"/binlog", 0);
+  std::string current = binlogFileName(dbname, 0);
   uint64_t currentno = -1;
 
   r = readlink(current.c_str(), path, PATH_MAX);
@@ -73,7 +79,7 @@ static void LinkBinlog(const std::string& name, const std::string& dbname) {
     currentno++;
   }
 
-  std::string lname = leveldb::LogFileName(dbname+"/binlog", currentno);
+  std::string lname = binlogFileName(dbname, currentno);
 
   r = link(name.c_str(), lname.c_str());
   r = unlink(current.c_str());
@@ -151,6 +157,7 @@ Options SanitizeOptions(const std::string& dbname,
   if (result.info_log == NULL) {
     // Open a log file in the same directory as the db
     src.env->CreateDir(dbname);  // In case it does not exist
+    src.env->CreateDir(dbname+"/binlog");
     src.env->RenameFile(InfoLogFileName(dbname), OldInfoLogFileName(dbname));
     Status s = src.env->NewLogger(InfoLogFileName(dbname), &result.info_log);
     if (!s.ok()) {

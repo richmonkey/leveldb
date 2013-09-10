@@ -49,6 +49,10 @@ class Env {
   virtual Status NewSequentialFile(const std::string& fname,
                                    SequentialFile** result) = 0;
 
+  virtual Status NewSequentialFile(const std::string& fname,
+				   FILE *file,
+                                   SequentialFile** result) = 0;
+
   // Create a brand new random access read-only file with the
   // specified name.  On success, stores a pointer to the new file in
   // *result and returns OK.  On failure stores NULL in *result and
